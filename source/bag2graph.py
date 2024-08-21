@@ -24,6 +24,9 @@ class Bag2Graph():
         print(self.dict_words, len(self.dict_words))
 
     
+    def get_filtered_words(self):
+        return self.selected_words
+
     def __get_count_from_bow(self, x_bow): 
         # added to make compatibility with variable length, otherwise just apply regular pyts BoP
         
@@ -45,11 +48,11 @@ class Bag2Graph():
         self.selected_words = self.dict_words[selected_fchi2]
         self.filtered_bop = x_bop[:, selected_fchi2]
         
-        print(f'Filtered {K} top words :',self.selected_words)
+        print(f'Filtered {K} top words :', self.selected_words)
 
 
     def apply_bow_uni(self, x, y, inx=0):
-        # fix this later , check the TODO bellow
+        # fix this later , check the TODO 
         x = x[:, inx] # TODO : add compatibility for other channels and variable length 
         X = check_array(x)
         X_bow = self.bow.fit_transform(X)
@@ -64,4 +67,37 @@ class Bag2Graph():
             filtered_bow = splited_bow[mask]
             filtered_xbow.append(filtered_bow)
 
-        return filtered_xbow
+        self.filtered_xbow = filtered_xbow
+
+        # return filtered_xbow
+    
+    def get_cooc_matrix(self, inx, include_diagonal=False):
+
+        # # get words to build the fera graph
+        f_bow = self.filtered_xbow[inx]
+
+        # # making the maximum possible matrix to be able to sum later
+        max_words = np.unique((self.selected_words.flatten()))
+        indx_words = dict(zip(max_words, range(len(max_words))))
+        r_indx_words = dict(zip(range(len(max_words)), max_words))
+        n = len(max_words) ## the adj will be ->  n x n matrix
+
+        # # creating the adjancey words : this could be usefull in the future to experiment K-connections        
+        neighbors = np.empty((len(f_bow) - 1, 2), dtype=f_bow.dtype)
+        neighbors[:, 0] = f_bow[:-1]
+        neighbors[:, 1] = f_bow[1:]
+
+        adj_m = np.zeros((n,n))
+        for a, b in neighbors:
+            inx_a, inx_b = indx_words[a], indx_words[b]
+            adj_m[inx_a, inx_b] += 1
+
+        if not include_diagonal: 
+            np.fill_diagonal(adj_m, 0)
+
+        row_sum = np.sum(adj_m, axis=1)
+        normalized_adj = adj_m / row_sum[:, np.newaxis]
+        normalized_adj = np.nan_to_num(normalized_adj, nan = 0)
+
+        return normalized_adj
+
