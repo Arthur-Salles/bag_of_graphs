@@ -70,7 +70,7 @@ class Bag2Graph():
         self.filtered_xbow = filtered_xbow
 
         # return filtered_xbow
-    
+
     def get_cooc_matrix(self, inx, include_diagonal=False):
 
         # # get words to build the fera graph
@@ -87,10 +87,21 @@ class Bag2Graph():
         neighbors[:, 0] = f_bow[:-1]
         neighbors[:, 1] = f_bow[1:]
 
+        ## vectorized + hash 
+        def __transform_word(a, b): 
+            n1, n2 = hash(a) % n, hash(b) % n 
+            # n1, n2 = indx_words[a] % n, indx_words[b] % n 
+            return n1, n2
+
+        v_func = np.vectorize(__transform_word)
+
         adj_m = np.zeros((n,n))
-        for a, b in neighbors:
-            inx_a, inx_b = indx_words[a], indx_words[b]
-            adj_m[inx_a, inx_b] += 1
+
+        edges = v_func(neighbors[:, 0], neighbors[:, 1])
+        print(edges)
+        edges_list = np.stack((edges[0], edges[1]), axis=-1) 
+        pairs, counts = np.unique(edges_list, axis = 0, return_counts=True)
+        adj_m[pairs[:, 0], pairs[:, 1]] = counts 
 
         if not include_diagonal: 
             np.fill_diagonal(adj_m, 0)
@@ -99,5 +110,5 @@ class Bag2Graph():
         normalized_adj = adj_m / row_sum[:, np.newaxis]
         normalized_adj = np.nan_to_num(normalized_adj, nan = 0)
 
-        return normalized_adj
+        return adj_m, neighbors, edges_list
 
