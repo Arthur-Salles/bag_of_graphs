@@ -6,6 +6,7 @@ import pyts.transformation
 from sklearn.feature_selection import chi2
 from sklearn.utils.validation import check_array
 import itertools
+import hashlib
 import string
 
 class Bag2Graph():
@@ -19,10 +20,7 @@ class Bag2Graph():
     ):
         
         self.bow = pyts.bag_of_words.BagOfWords(window_size, word_size, n_bins)
-
         self.dict_words = np.apply_along_axis("".join, axis=1,arr=list(itertools.product(*([[i for i in string.ascii_letters[:n_bins]]] * word_size))))
-
-        print(self.dict_words, len(self.dict_words))
         self.channel_size = channel_size
     
     def get_filtered_words(self):
@@ -52,39 +50,18 @@ class Bag2Graph():
         self.filtered_masks = selected_fchi2
         self.selected_words = self.dict_words[selected_fchi2]
         self.filtered_bop = x_bop[:, selected_fchi2]
-        
+
+        self.word_to_number = {self.selected_words[i] : i for i in range(len(self.selected_words))}
+
+        # self.word_to_number = {self.selected_words[i] : int(hashlib.sha256(self.selected_words[i].encode()).hexdigest(), 16) % 1000 for i in range(len(self.selected_words))}
+        self.number_to_word = {i : self.selected_words[i]  for i in range(len(self.selected_words))}
+        print(self.word_to_number)
         print(f'Filtered {K} top words :', self.selected_words,'\n')
-
-
-
-    # def apply_bow_uni(self, x, y, inx=0):
-    #     x = x[:, inx] # TODO : add compatibility for variable length 
-    #     X = check_array(x)
-    #     X_bow = self.bow.fit_transform(X)
-    #     x_bop = np.array([ self.__get_count_from_bow(xb) for xb in X_bow])
-
-    #     self.__filter_words(x_bop, y)
-
-    #     filtered_xbow = []
-    #     for inx, bow in enumerate(X_bow):
-    #         splited_bow = np.array(bow.split(' '))
-    #         # print(splited_bow)
-    #         mask = np.isin(splited_bow, self.selected_words)
-    #         filtered_bow = splited_bow[mask]
-    #         filtered_xbow.append(filtered_bow)
-
-    #         print(filtered_xbow)
-        
-    #     self.filtered_xbow = filtered_xbow
-
-    #     return filtered_xbow
-
 
 
     def apply_bow(self, x, y, aggregation_type='sum'):
 
-        t_xbop = []
-        t_Xbow = []
+        t_xbop, t_Xbow = [], []
         filtered_xbow = []
 
         # TODO : select aggregation method for multivariable here or maybe in another object lol
@@ -95,7 +72,6 @@ class Bag2Graph():
             X = x[:, ch]
             X = check_array(X)
             X_bow = self.bow.fit_transform(X)
-            # print(X_bow.shape)
             x_bop = np.array([ self.__get_count_from_bow(xb) for xb in X_bow])
             t_xbop.append(x_bop)
             t_Xbow.append(X_bow)
@@ -116,54 +92,59 @@ class Bag2Graph():
             filtered_xbow.append(f_w)
 
         filtered_xbow = np.array(filtered_xbow, dtype='object')
-        print('shape',filtered_xbow.shape)
+        print('shape', filtered_xbow.shape)
 
+        self.filtered_xbow = filtered_xbow
 
+        return filtered_xbow
 
-        
+    def __np_to_number(self, a, b):
+        return self.word_to_number[a], self.word_to_number[b]
 
-    def __get_inx_cooc_matrix(self, inx, include_diagonal=False):
+    def get_inx_cooc_matrix(self, inx, ch, include_diagonal=False):
 
         # # get words to build the fera graph
-        f_bow = self.filtered_xbow[inx]
-
-        # # making the maximum possible matrix to be able to sum later
-        max_words = np.unique((self.selected_words.flatten()))
-        n = len(max_words) ## the adj will be ->  n x n matrix
+        f_bow = self.filtered_xbow[0, ch]
 
         # # creating the adjancey words : this could be usefull in the future to experiment K-connections        
         neighbors = np.empty((len(f_bow) - 1, 2), dtype=f_bow.dtype)
         neighbors[:, 0] = f_bow[:-1]
         neighbors[:, 1] = f_bow[1:]
 
-        ###  vectorized + hash 
-        def __transform_word(a, b): 
-            n1, n2 = hash(a) % n, hash(b) % n 
-            return n1, n2
+        v_func = np.vectorize(self.__np_to_number)
+        edges = v_func(neighbors[:,0], neighbors[:,1])
+        # print(edges)
 
-        v_func = np.vectorize(__transform_word)
-
-        adj_m = np.zeros((n, n))
-
-        edges = v_func(neighbors[:, 0], neighbors[:, 1])
-        print(edges)
+        # print(neighbors)
         edges_list = np.stack((edges[0], edges[1]), axis=-1) 
+        # print(edges_list)
         pairs, counts = np.unique(edges_list, axis = 0, return_counts=True)
 
-        adj_m[pairs[:, 0], pairs[:, 1]] = counts  # CAN THIS BE DONE WITHOUT CREATING AN ADJ MATRIX ?????
+        edges_with_weights = np.column_stack((np.unique(edges_list, axis = 0, return_counts=True)))
 
-        if not include_diagonal: 
-            np.fill_diagonal(adj_m, 0)
+        return pairs, counts, edges_with_weights
 
-        row_sum = np.sum(adj_m, axis=1)
-        normalized_adj = adj_m / row_sum[:, np.newaxis]
-        normalized_adj = np.nan_to_num(normalized_adj, nan = 0)
+    def get_cooc_matrix(self, inx, aggregation_type='sum', include_diagonal=False):
 
-        return normalized_adj, neighbors, edges_list
+        # # making the maximum possible matrix to be able to sum later
+        max_words = np.unique((self.selected_words.flatten()))
+        n = len(max_words) ## the adj will be ->  n x n matrix
 
-    def get_cooc_matrix(self, x, aggregation_type='sum', include_diagonal=False):
+        adj_m = np.zeros((self.channel_size, n, n))
+
+        agg = self.__select_agg(aggregation_type)
 
         for ch in range(self.channel_size):
-            
-            X = x[:, ch]
-            n_adj, _, edges_list = self.__get_inx_cooc_matrix(ch, False)
+
+            pairs, counts, edges_with_weight = self.get_inx_cooc_matrix(inx, ch)
+
+            # adj_m[ch, pairs[:, 0], pairs[:, 1]] = counts
+            # print(edges_with_weight)
+            # print(edges_with_weight)
+            # print('----')
+        
+        adj_m = agg(adj_m, axis=0)
+
+        print(adj_m)
+        
+        return adj_m
