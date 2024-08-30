@@ -113,11 +113,8 @@ class Bag2Graph():
 
         v_func = np.vectorize(self.__np_to_number)
         edges = v_func(neighbors[:,0], neighbors[:,1])
-        # print(edges)
 
-        # print(neighbors)
         edges_list = np.stack((edges[0], edges[1]), axis=-1) 
-        # print(edges_list)
         pairs, counts = np.unique(edges_list, axis = 0, return_counts=True)
 
         edges_with_weights = np.column_stack((np.unique(edges_list, axis = 0, return_counts=True)))
@@ -130,7 +127,8 @@ class Bag2Graph():
         max_words = np.unique((self.selected_words.flatten()))
         n = len(max_words) ## the adj will be ->  n x n matrix
 
-        adj_m = np.zeros((self.channel_size, n, n))
+        # adj_m = np.zeros((self.channel_size, n, n))
+        edg_list = []
 
         agg = self.__select_agg(aggregation_type)
 
@@ -138,13 +136,17 @@ class Bag2Graph():
 
             pairs, counts, edges_with_weight = self.get_inx_cooc_matrix(inx, ch)
 
+            edg_list.append(edges_with_weight)
+
             # adj_m[ch, pairs[:, 0], pairs[:, 1]] = counts
             # print(edges_with_weight)
             # print(edges_with_weight)
             # print('----')
         
-        adj_m = agg(adj_m, axis=0)
+        # adj_m = agg(adj_m, axis=0)
+        edg_list = np.array(edg_list)
 
-        print(adj_m)
+        print(edg_list)
+        return edg_list
         
-        return adj_m
+        # return adj_m
